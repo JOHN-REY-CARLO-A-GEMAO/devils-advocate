@@ -34,31 +34,11 @@ export type CanonicalCaseAnalysis = {
 }
 
 const SYSTEM_PROMPT = `You are an adversarial pre-mortem courtroom. Return valid JSON only.
-Analyze the user's decision through three distinct critics: The Cynical CFO, The Disappointed Parent,
-and The Paranoid Competitor. Return {initialScore:number, objections:[{personaId:string,text:string,pressure:string}],
-criticalBlindspot:string, prescriptions:string[]}. Be specific to the case, direct but useful, and never invent facts.`
-
-const mockFallback = (input: CaseInput) => {
-  const text = `${input.title} ${input.plan}`.toLowerCase()
-  const has = (pattern: RegExp) => pattern.test(text)
-  const detail = [
-    has(/budget|php|\$|saving|runway|revenue/) ? 1 : 0,
-    has(/customer|audience|user|client|waitlist|interview/) ? 1 : 0,
-    has(/timeline|month|week|quarter|deadline/) ? 1 : 0,
-    has(/fallback|pivot|stop|worst|plan b/) ? 1 : 0,
-  ].reduce((a, b) => a + b, 0)
-  return {
-    provider: 'mock' as Provider,
-    initialScore: Math.min(60, 24 + detail * 7),
-    objections: [
-      { personaId: 'cfo', text: `What is the hard cash boundary for ${input.title}?`, pressure: 'No stop-loss. No mercy.' },
-      { personaId: 'parent', text: 'What protects your energy and relationships when the first version underperforms?', pressure: 'Ambition is not a burnout protocol.' },
-      { personaId: 'competitor', text: 'What stays uniquely yours when a better-funded rival copies the visible idea?', pressure: 'A feature is not a moat.' },
-    ],
-    criticalBlindspot: has(/budget|php|\$|saving|runway/) ? 'The missing exit ramp' : 'The unpriced downside',
-    prescriptions: ['Set a written downside budget and review date.', 'Validate demand with real conversations before scaling.', 'Define a pause, pivot, or return-to-safety trigger.'],
-  }
-}
+Analyze the user's decision through three distinct critics, one per personaId:
+'cfo' (The Cynical CFO), 'parent' (The Disappointed Parent), 'competitor' (The Paranoid Competitor).
+Return {initialScore:number, objections:[{personaId:'cfo'|'parent'|'competitor',text:string,pressure:string}],
+criticalBlindspot:string, prescriptions:string[]} with exactly three objections.
+Be specific to the case, direct but useful, and never invent facts.`
 
 async function askOpenAI(input: CaseInput, apiKey: string) {
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -162,14 +142,20 @@ export function translateProviderCase(input: CaseInput, draft: unknown): Canonic
   }
 }
 
-/** Prefer a configured provider, but always return a playable result if it fails. */
-export async function generateCourtroomCase(input: CaseInput) {
+/**
+ * Ask a configured provider for a case, or fall back to the deterministic engine.
+ *
+ * The result is always the canonical CaseAnalysis: a transport failure, a non-JSON body, or a
+ * payload the adapter cannot repair routes to the engine rather than to a caller.
+ */
+export async function generateCourtroomCase(input: CaseInput): Promise<CanonicalCaseAnalysis> {
   const env = typeof process !== 'undefined' ? process.env : {}
   try {
-    if (env.OPENAI_API_KEY) return { ...(await askOpenAI(input, env.OPENAI_API_KEY)), provider: 'openai' as Provider }
-    if (env.ANTHROPIC_API_KEY) return { ...(await askAnthropic(input, env.ANTHROPIC_API_KEY)), provider: 'anthropic' as Provider }
+    if (env.OPENAI_API_KEY) return translateProviderCase(input, await askOpenAI(input, env.OPENAI_API_KEY))
+    if (env.ANTHROPIC_API_KEY) return translateProviderCase(input, await askAnthropic(input, env.ANTHROPIC_API_KEY))
   } catch (error) {
-    console.warn('[courtroom] Provider unavailable; using mock engine.', error)
+    console.warn('[courtroom] Provider unavailable; using the deterministic engine.', error)
   }
-  return mockFallback(input)
+  // No provider payload: the engine's analysis is the canonical result.
+  return translateProviderCase(input, null)
 }
