@@ -29,12 +29,14 @@ import {
 import { jsPDF } from 'jspdf'
 import {
   PERSONAS,
+  advance,
   analyzeCase,
+  answer,
   captureEvent,
   classifyBand,
-  createVerdict,
   evaluateRebuttal,
   getCaseNumber,
+  makeTrial,
   wordCount,
 } from './lib/courtroom'
 import './styles.css'
@@ -51,6 +53,9 @@ const EMPTY_FORM = { title: '', plan: '', category: 'Startup' }
 // sealed Verdict's labels; only the band itself is canonical (classifyBand).
 const GAUGE_LABELS = { convicted: 'GUILTY OF DELUSION', probation: 'PROBATIONARY', acquitted: 'BATTLE-TESTED' }
 const GAUGE_TONES = { convicted: 'danger', probation: 'warning', acquitted: 'safe' }
+// How long an answered round's reaction stays on screen before the next round opens or the
+// verdict is sealed. Presentation timing: the domain machine has no timers.
+const REVEAL_PAUSE_MS = 1150
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
 
 function App() {
@@ -58,7 +63,9 @@ function App() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [errors, setErrors] = useState({})
   const [caseFile, setCaseFile] = useState(null)
-  const [trial, setTrial] = useState({ activeRound: 0, score: 0, rebuttals: [], phase: 'witness', reaction: '', currentRebuttal: '' })
+  const [trial, setTrial] = useState(() => makeTrial(0))
+  // The defense being typed. The draft is the UI's, not the machine's.
+  const [rebuttal, setRebuttal] = useState('')
   const [verdict, setVerdict] = useState(null)
   const [deliberationStep, setDeliberationStep] = useState(0)
   const [toast, setToast] = useState('')
@@ -93,6 +100,26 @@ function App() {
     }
   }, [screen, verdict])
 
+  // The reveal pause. Once a round has been answered the reaction stays on screen, then the
+  // machine moves on — the next round opens, or the verdict is sealed. Owning this in an effect
+  // is what makes it cancellable: bailing, resetting, or unmounting tears the effect down and
+  // clears the timer, so no pending transition can fire for an abandoned case.
+  useEffect(() => {
+    if (screen !== 'trial' || !caseFile || trial.phase !== 'reaction') return undefined
+    const timer = window.setTimeout(() => {
+      const next = advance(trial, { caseData: caseFile })
+      if (next.verdict) {
+        setVerdict(next.verdict)
+        setScreen('deliberation')
+      } else {
+        setTrial(next.trial)
+        setRebuttal('')
+        captureEvent('objection_faced', { round: next.trial.activeRound + 1, persona: caseFile.objections[next.trial.activeRound].persona.id })
+      }
+    }, REVEAL_PAUSE_MS)
+    return () => window.clearTimeout(timer)
+  }, [screen, trial, caseFile])
+
   function updateForm(field, value) {
     setForm((current) => ({ ...current, [field]: value }))
     if (errors[field]) setErrors((current) => ({ ...current, [field]: '' }))
@@ -111,7 +138,8 @@ function App() {
     const analysis = analyzeCase(form)
     const docket = { ...form, title: form.title.trim(), plan: form.plan.trim(), docket: getCaseNumber(), ...analysis }
     setCaseFile(docket)
-    setTrial({ activeRound: 0, score: analysis.initialScore, rebuttals: [], phase: 'witness', reaction: '', currentRebuttal: '' })
+    setTrial(makeTrial(analysis.initialScore))
+    setRebuttal('')
     setVerdict(null)
     verdictTracked.current = false
     setScreen('trial')
@@ -122,38 +150,20 @@ function App() {
   function submitRebuttal(event) {
     event.preventDefault()
     if (trial.phase === 'reaction' || submitted) return
-    const rebuttal = trial.currentRebuttal.trim()
-    if (!rebuttal) {
+    const defense = rebuttal.trim()
+    if (!defense) {
       setToast('The clerk needs a defense before the court can proceed.')
       return
     }
-    const evaluation = evaluateRebuttal({ rebuttal, personaId: activePersona.id, signals: caseFile.signals })
-    const entry = {
-      text: rebuttal,
-      delta: evaluation.delta,
-      personaId: activePersona.id,
-      personaName: activePersona.name,
-    }
-    const rebuttals = [...trial.rebuttals, entry]
-    const nextScore = clamp(trial.score + evaluation.delta, 0, 100)
+    const evaluation = evaluateRebuttal({ rebuttal: defense, personaId: activePersona.id, signals: caseFile.signals })
     captureEvent('rebuttal_submitted', {
       round: trial.activeRound + 1,
       persona: activePersona.id,
-      rebuttal_length: rebuttal.length,
+      rebuttal_length: defense.length,
       score_delta: evaluation.delta,
     })
-    setTrial((current) => ({ ...current, score: nextScore, rebuttals, phase: 'reaction', reaction: evaluation.reaction }))
-
-    window.setTimeout(() => {
-      if (trial.activeRound === 2) {
-        setVerdict(createVerdict({ caseData: caseFile, rebuttals, score: nextScore }))
-        setScreen('deliberation')
-      } else {
-        const nextRound = trial.activeRound + 1
-        setTrial((current) => ({ ...current, activeRound: nextRound, phase: 'witness', reaction: '', currentRebuttal: '' }))
-        captureEvent('objection_faced', { round: nextRound + 1, persona: caseFile.objections[nextRound].persona.id })
-      }
-    }, 1150)
+    // The machine records the answer; the reveal pause above carries it to the next round.
+    setTrial(answer(trial, { rebuttal: defense, caseData: caseFile, evaluation }))
   }
 
   function bailOut() {
@@ -161,7 +171,8 @@ function App() {
     setToast(`Case ${caseFile?.docket || ''} closed without a verdict.`)
     setScreen('docket')
     setCaseFile(null)
-    setTrial({ activeRound: 0, score: 0, rebuttals: [], phase: 'witness', reaction: '', currentRebuttal: '' })
+    setTrial(makeTrial(0))
+    setRebuttal('')
   }
 
   function resetTrial() {
@@ -169,7 +180,8 @@ function App() {
     setErrors({})
     setCaseFile(null)
     setVerdict(null)
-    setTrial({ activeRound: 0, score: 0, rebuttals: [], phase: 'witness', reaction: '', currentRebuttal: '' })
+    setTrial(makeTrial(0))
+    setRebuttal('')
     setScreen('docket')
     verdictTracked.current = false
   }
@@ -278,8 +290,9 @@ function App() {
             activePersona={activePersona}
             activeObjection={activeObjection}
             submitted={submitted}
+            rebuttal={rebuttal}
             submitRebuttal={submitRebuttal}
-            setRebuttal={(value) => setTrial((current) => ({ ...current, currentRebuttal: value }))}
+            setRebuttal={setRebuttal}
             bailOut={bailOut}
           />
         )}
@@ -350,7 +363,7 @@ function Ticker() {
   return <div className="ticker"><div className="ticker-label"><span className="live-dot" /> RECENTLY ON THE RECORD</div><div className="ticker-window"><div className="ticker-track">{[...TICKER_ITEMS, ...TICKER_ITEMS].map((item, index) => <span key={`${item}-${index}`}>{item}<b>✦</b></span>)}</div></div></div>
 }
 
-function TrialScreen({ caseFile, trial, activePersona, activeObjection, submitted, submitRebuttal, setRebuttal, bailOut }) {
+function TrialScreen({ caseFile, trial, activePersona, activeObjection, submitted, rebuttal, submitRebuttal, setRebuttal, bailOut }) {
   const band = classifyBand(trial.score)
   const scoreLabel = GAUGE_LABELS[band]
   const scoreProgress = clamp(trial.score, 0, 100)
@@ -377,7 +390,7 @@ function TrialScreen({ caseFile, trial, activePersona, activeObjection, submitte
             </motion.div>
           </AnimatePresence>
           <AnimatePresence mode="wait">
-            {reaction ? <motion.div key="reaction" className={`reaction-card reaction-${activePersona.color}`} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}><div className="reaction-icon"><Zap size={15} /></div><div><span className="reaction-label">{activePersona.shortName}'S REACTION</span><p>{trial.reaction}</p></div><div className="score-delta">{trial.rebuttals.at(-1)?.delta > 0 ? '+' : ''}{trial.rebuttals.at(-1)?.delta} <small>PTS</small></div></motion.div> : <motion.form key="defense" className="defense-panel" data-posthog-event="rebuttal_submitted" data-round={trial.activeRound + 1} data-persona={activePersona.id} onSubmit={submitRebuttal}><div className="defense-heading"><div><span className="form-kicker">YOUR TURN, PETITIONER</span><h3>Submit your defense <em>under oath.</em></h3></div><span className="defense-count">{wordCount(trial.currentRebuttal)} / 120 WORDS</span></div><textarea aria-label="Submit your defense under oath" value={trial.currentRebuttal} maxLength={1000} onChange={(event) => setRebuttal(event.target.value)} placeholder="Answer the specific objection. Receipts beat reassurance." autoFocus={!submitted} /><div className="defense-bottom"><span className={wordCount(trial.currentRebuttal) > 0 ? 'ready-label' : ''}>{wordCount(trial.currentRebuttal) > 0 ? 'DEFENSE READY FOR THE RECORD' : 'A specific answer earns a stronger score'}</span><button className="primary-button" id={`btn-submit-rebuttal-round-${trial.activeRound + 1}`} type="submit">Submit rebuttal <ArrowRight size={15} /></button></div></motion.form>}
+            {reaction ? <motion.div key="reaction" className={`reaction-card reaction-${activePersona.color}`} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}><div className="reaction-icon"><Zap size={15} /></div><div><span className="reaction-label">{activePersona.shortName}'S REACTION</span><p>{trial.reaction}</p></div><div className="score-delta">{trial.rebuttals.at(-1)?.delta > 0 ? '+' : ''}{trial.rebuttals.at(-1)?.delta} <small>PTS</small></div></motion.div> : <motion.form key="defense" className="defense-panel" data-posthog-event="rebuttal_submitted" data-round={trial.activeRound + 1} data-persona={activePersona.id} onSubmit={submitRebuttal}><div className="defense-heading"><div><span className="form-kicker">YOUR TURN, PETITIONER</span><h3>Submit your defense <em>under oath.</em></h3></div><span className="defense-count">{wordCount(rebuttal)} / 120 WORDS</span></div><textarea aria-label="Submit your defense under oath" value={rebuttal} maxLength={1000} onChange={(event) => setRebuttal(event.target.value)} placeholder="Answer the specific objection. Receipts beat reassurance." autoFocus={!submitted} /><div className="defense-bottom"><span className={wordCount(rebuttal) > 0 ? 'ready-label' : ''}>{wordCount(rebuttal) > 0 ? 'DEFENSE READY FOR THE RECORD' : 'A specific answer earns a stronger score'}</span><button className="primary-button" id={`btn-submit-rebuttal-round-${trial.activeRound + 1}`} type="submit">Submit rebuttal <ArrowRight size={15} /></button></div></motion.form>}
           </AnimatePresence>
         </section>
         <aside className="record-sidebar">

@@ -182,6 +182,64 @@ export function createVerdict({ caseData, rebuttals, score }) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Trial: the pre-mortem state machine.
+//
+// It owns the round on the stand, the survivability score, the record of rebuttals, round
+// advancement, and the verdict trigger. It owns no timers, no navigation, and no draft text:
+// the reveal pause between a round being answered and the next round opening is presentation,
+// so the UI schedules it and the UI can cancel it.
+//
+// Two phase values, `'witness'` and `'reaction'`, mean "this round accepts an answer" and
+// "this round has been answered". They are load-bearing: `answer` refuses a second answer to a
+// round in reaction, and `advance` refuses to move a trial that has not been answered.
+// ---------------------------------------------------------------------------
+
+/** Start a trial at the analysis's initial score. The score contract is a normalized integer 0..100. */
+export function makeTrial(initialScore) {
+  return { activeRound: 0, score: clamp(initialScore, 0, 100), rebuttals: [], phase: 'witness', reaction: '' }
+}
+
+/**
+ * Record the answer to the round on the stand and apply its evaluation.
+ *
+ * The answering Persona is derived from the round — objection `activeRound` belongs to
+ * `PERSONAS[activeRound]` (Card 1's registry-order invariant) — so the record cannot be built
+ * out of order. A round that has already been answered accepts no second answer.
+ */
+export function answer(trial, { rebuttal, caseData, evaluation }) {
+  if (trial.phase !== 'witness') return trial
+  const { persona } = caseData.objections[trial.activeRound]
+  return {
+    ...trial,
+    score: clamp(trial.score + evaluation.delta, 0, 100),
+    rebuttals: [...trial.rebuttals, {
+      text: rebuttal,
+      delta: evaluation.delta,
+      personaId: persona.id,
+      personaName: persona.name,
+    }],
+    phase: 'reaction',
+    reaction: evaluation.reaction,
+  }
+}
+
+/**
+ * Move an answered trial on: either the next round opens, or the trial is over and the Verdict
+ * is sealed from the record. A trial that has not been answered has nothing to advance, so this
+ * is a no-op — which is what makes a stale caller harmless.
+ */
+export function advance(trial, { caseData }) {
+  if (trial.phase !== 'reaction') return { trial, verdict: null }
+  if (trial.activeRound >= caseData.objections.length - 1) {
+    return { trial, verdict: createVerdict({ caseData, rebuttals: trial.rebuttals, score: trial.score }) }
+  }
+  return {
+    trial: { ...trial, activeRound: trial.activeRound + 1, phase: 'witness', reaction: '' },
+    verdict: null,
+  }
+}
+
 export function captureEvent(eventName, payload = {}) {
   if (typeof window !== 'undefined') {
     // Optional PostHog integration: define window.posthog via the official snippet or SDK.

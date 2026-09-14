@@ -30,7 +30,11 @@ The band is one rule; the words are not. The trial gauge labels a still-provisio
 
 **Critical blindspot** — the single most dangerous unanswered risk, chosen by precedence: unpriced downside → missing exit ramp → unproven demand → copyability → execution drag.
 
-**Trial** — the three-round sequence over the three Personas: `activeRound`, `score`, `rebuttals`, `phase`.
+**Trial** — the pre-mortem state machine over the three Personas, owned by the domain module as `makeTrial` / `answer` / `advance`: `activeRound` (the round on the stand), `score`, `rebuttals` (the record), `phase`, and `reaction` (the evaluation currently on screen). `makeTrial(initialScore)` starts it, `answer(trial, { rebuttal, caseData, evaluation })` records a defense and applies its delta, and `advance(trial, { caseData })` opens the next round or seals the Verdict from the record.
+
+`phase` is `'witness'` (this round accepts an answer) or `'reaction'` (this round has been answered). It is load-bearing: `answer` refuses a second answer to an answered round, and `advance` refuses to move a trial that has not been answered — which is what makes a stale caller harmless.
+
+The machine owns no timers, no navigation, and no draft text. The **reveal pause** between a round being answered and the next round opening is presentation timing owned by the UI, which is what makes it cancellable; the defense being typed is UI state, not Trial state.
 
 ## Canonical ownership
 
@@ -43,4 +47,6 @@ Providers (OpenAI / Anthropic) and the server seam in `lib/courtroom.ts` own **p
 - Exactly three objections, one per Persona, in registry order; round index == persona index.
 - `initialScore` sits inside the engine's starting envelope (18..61).
 - Score is clamped to 0..100 at every step; the band thresholds 40 and 75 have one owner, and band values are the canonical `'convicted' | 'probation' | 'acquitted'` strings.
+- Round `r` is answered by `PERSONAS[r]`: `answer` derives the Persona from the round, so the record cannot fall out of registry order.
+- A trial that has not been answered cannot advance, and a finished trial does not advance again.
 - Every path returns a playable Case: a failed or malformed provider response falls back to the engine.
