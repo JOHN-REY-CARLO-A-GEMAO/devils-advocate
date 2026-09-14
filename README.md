@@ -7,6 +7,7 @@ A dark-mode cyber-legal thriller for pressure-testing major decisions before rea
 ```bash
 npm install
 npm run dev
+npm test
 ```
 
 The app ships with a deterministic, keyword-aware mock engine, so it is playable without any API key. It includes:
@@ -21,7 +22,9 @@ The app ships with a deterministic, keyword-aware mock engine, so it is playable
 
 ## Optional server-side AI
 
-`lib/courtroom.ts` is a server-only adapter seam. Wire `generateCourtroomCase` to a Next.js route, edge function, or API server and set either `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in the server environment. Never expose those keys in the browser. If a configured provider errors, the adapter returns a safe mock result.
+`lib/courtroom.ts` is a server-only adapter seam. Wire `generateCourtroomCase` to a Next.js route, edge function, or API server and set either `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in the server environment. Never expose those keys in the browser.
+
+`generateCourtroomCase` always resolves to the canonical CaseAnalysis defined in `src/lib/courtroom.js`, never to raw provider output. Objections are resolved through the Persona registry, the starting score is clamped into the engine's 18..61 envelope, and a transport failure or an unrepairable payload falls back to the deterministic engine — so the caller always receives a playable case.
 
 ## Analytics
 

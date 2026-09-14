@@ -35,6 +35,29 @@ export const PERSONAS = [
   },
 ]
 
+/** The canonical starting envelope for a trial. One location, used by the engine and the provider adapter. */
+export const INITIAL_SCORE_RANGE = { min: 18, max: 61 }
+
+/**
+ * The one owner of the survivability bands (the thresholds 40 and 75).
+ *
+ * Input is the canonical score: the normalized integer 0..100 a trial keeps. Classification
+ * happens downstream of normalization — `createVerdict` rounds and clamps before calling this,
+ * so a raw fractional score must never reach it (39.5 is the 40 band, not the 39 band).
+ *
+ * Returns the canonical band value, which is also the Verdict's `verdictType` vocabulary and an
+ * external contract (the `verdict_type` analytics payload and the `data-verdict-type` attribute).
+ * Presentation stays with the consumers: labels, tones, and copy are not the band's business.
+ */
+export const classifyBand = (score) => (score >= 75 ? 'acquitted' : score >= 40 ? 'probation' : 'convicted')
+
+/** The sealed Verdict's canonical labels — domain output, printed verbatim by the stamp and the PDF. */
+const VERDICT_LABELS = {
+  convicted: 'CONVICTED OF DELUSION',
+  probation: 'PROBATIONARY RISK',
+  acquitted: 'STRESS-TESTED & ACQUITTED',
+}
+
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
 
 const words = (value = '') => value.trim().split(/\s+/).filter(Boolean)
@@ -91,7 +114,7 @@ function buildObjections(title, plan, category, signals) {
 export function analyzeCase({ title, plan, category }) {
   const signals = parseSignals(title, plan, category)
   const categoryBoost = { Career: 2, Startup: 0, Financial: -3, Relocation: 1, Relationship: -1 }[category] ?? 0
-  const initialScore = clamp(23 + signals.specificity * 5 + (signals.planWords >= 80 ? 5 : signals.planWords >= 45 ? 2 : 0) + categoryBoost, 18, 61)
+  const initialScore = clamp(23 + signals.specificity * 5 + (signals.planWords >= 80 ? 5 : signals.planWords >= 45 ? 2 : 0) + categoryBoost, INITIAL_SCORE_RANGE.min, INITIAL_SCORE_RANGE.max)
   return {
     signals,
     initialScore,
@@ -120,17 +143,10 @@ export function evaluateRebuttal({ rebuttal, personaId, signals }) {
 }
 
 export function createVerdict({ caseData, rebuttals, score }) {
-  const { signals, objections } = caseData
+  const { signals } = caseData
   const finalScore = clamp(Math.round(score), 0, 100)
-  let verdictType = 'convicted'
-  let verdictLabel = 'CONVICTED OF DELUSION'
-  if (finalScore >= 75) {
-    verdictType = 'acquitted'
-    verdictLabel = 'STRESS-TESTED & ACQUITTED'
-  } else if (finalScore >= 40) {
-    verdictType = 'probation'
-    verdictLabel = 'PROBATIONARY RISK'
-  }
+  const verdictType = classifyBand(finalScore)
+  const verdictLabel = VERDICT_LABELS[verdictType]
 
   const missing = !signals.hasMoney
     ? { title: 'The unpriced downside', body: `The plan has no explicit cash boundary. Without a budget, runway, or stop-loss, ${caseData.title || 'the decision'} can quietly turn into an open-ended bet.` }
@@ -162,7 +178,64 @@ export function createVerdict({ caseData, rebuttals, score }) {
     strongestDefense,
     strongestPersona: strongest?.personaName || 'the record',
     prescriptions,
-    objections,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Trial: the pre-mortem state machine.
+//
+// It owns the round on the stand, the survivability score, the record of rebuttals, round
+// advancement, and the verdict trigger. It owns no timers, no navigation, and no draft text:
+// the reveal pause between a round being answered and the next round opening is presentation,
+// so the UI schedules it and the UI can cancel it.
+//
+// Two phase values, `'witness'` and `'reaction'`, mean "this round accepts an answer" and
+// "this round has been answered". They are load-bearing: `answer` refuses a second answer to a
+// round in reaction, and `advance` refuses to move a trial that has not been answered.
+// ---------------------------------------------------------------------------
+
+/** Start a trial at the analysis's initial score. The score contract is a normalized integer 0..100. */
+export function makeTrial(initialScore) {
+  return { activeRound: 0, score: clamp(initialScore, 0, 100), rebuttals: [], phase: 'witness', reaction: '' }
+}
+
+/**
+ * Record the answer to the round on the stand and apply its evaluation.
+ *
+ * The answering Persona is derived from the round — objection `activeRound` belongs to
+ * `PERSONAS[activeRound]` (Card 1's registry-order invariant) — so the record cannot be built
+ * out of order. A round that has already been answered accepts no second answer.
+ */
+export function answer(trial, { rebuttal, caseData, evaluation }) {
+  if (trial.phase !== 'witness') return trial
+  const { persona } = caseData.objections[trial.activeRound]
+  return {
+    ...trial,
+    score: clamp(trial.score + evaluation.delta, 0, 100),
+    rebuttals: [...trial.rebuttals, {
+      text: rebuttal,
+      delta: evaluation.delta,
+      personaId: persona.id,
+      personaName: persona.name,
+    }],
+    phase: 'reaction',
+    reaction: evaluation.reaction,
+  }
+}
+
+/**
+ * Move an answered trial on: either the next round opens, or the trial is over and the Verdict
+ * is sealed from the record. A trial that has not been answered has nothing to advance, so this
+ * is a no-op — which is what makes a stale caller harmless.
+ */
+export function advance(trial, { caseData }) {
+  if (trial.phase !== 'reaction') return { trial, verdict: null }
+  if (trial.activeRound >= caseData.objections.length - 1) {
+    return { trial, verdict: createVerdict({ caseData, rebuttals: trial.rebuttals, score: trial.score }) }
+  }
+  return {
+    trial: { ...trial, activeRound: trial.activeRound + 1, phase: 'witness', reaction: '' },
+    verdict: null,
   }
 }
 
