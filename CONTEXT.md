@@ -18,7 +18,13 @@ Domain language for The Devil's Advocate (pre-mortem courtroom). These are the n
 
 **Survivability score** — the 0..100 score on the record. Starts at the analysis's `initialScore` (engine envelope 20..60; clamp 18..61), moves by each Rebuttal's `delta` (−5..13), and is clamped to 0..100 before the Verdict.
 
-**Band** — the score's label group: convicted (< 40), probationary (40..74), acquitted (≥ 75). The thresholds are one rule with several presentations (gauge label, verdict type, stamp tone, headline).
+**Band** — the score's label group, defined by two thresholds only: convicted (< 40), probationary (40..74), acquitted (≥ 75).
+
+The canonical band values are exactly `'convicted' | 'probation' | 'acquitted'`. `'probation'` is the value, "probationary" is the human name for the same band, and the value is an external contract (the `verdict_type` analytics payload and the `data-verdict-type` attribute) — do not rename it.
+
+A band is classified from the **canonical score**: a normalized integer in 0..100. Normalization (rounding, then clamping) happens before classification, so 39.5 bands as 40 (probationary) and 74.5 bands as 75 (acquitted).
+
+The band is one rule; the words are not. The trial gauge labels a still-provisional score in its own vocabulary (GUILTY OF DELUSION / PROBATIONARY / BATTLE-TESTED), the sealed Verdict uses the canonical labels (CONVICTED OF DELUSION / PROBATIONARY RISK / STRESS-TESTED & ACQUITTED), and headline copy and tone class names are presentation, owned by the UI.
 
 **Verdict** — the sealed outcome: `score`, `verdictType`, `verdictLabel`, `criticalBlindspot` (`{title, body}`), `strongestDefense`, `strongestPersona`, `prescriptions`.
 
@@ -36,5 +42,5 @@ Providers (OpenAI / Anthropic) and the server seam in `lib/courtroom.ts` own **p
 
 - Exactly three objections, one per Persona, in registry order; round index == persona index.
 - `initialScore` sits inside the engine's starting envelope (18..61).
-- Score is clamped to 0..100 at every step; band thresholds 40 and 75 live in one place.
+- Score is clamped to 0..100 at every step; the band thresholds 40 and 75 have one owner, and band values are the canonical `'convicted' | 'probation' | 'acquitted'` strings.
 - Every path returns a playable Case: a failed or malformed provider response falls back to the engine.

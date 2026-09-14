@@ -31,6 +31,7 @@ import {
   PERSONAS,
   analyzeCase,
   captureEvent,
+  classifyBand,
   createVerdict,
   evaluateRebuttal,
   getCaseNumber,
@@ -46,6 +47,10 @@ const TICKER_ITEMS = [
   'CASE #8298 ACQUITTED AFTER CUSTOMER INTERVIEWS',
 ]
 const EMPTY_FORM = { title: '', plan: '', category: 'Startup' }
+// The trial gauge's own vocabulary for a still-provisional score. Deliberately different from the
+// sealed Verdict's labels; only the band itself is canonical (classifyBand).
+const GAUGE_LABELS = { convicted: 'GUILTY OF DELUSION', probation: 'PROBATIONARY', acquitted: 'BATTLE-TESTED' }
+const GAUGE_TONES = { convicted: 'danger', probation: 'warning', acquitted: 'safe' }
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
 
 function App() {
@@ -346,14 +351,15 @@ function Ticker() {
 }
 
 function TrialScreen({ caseFile, trial, activePersona, activeObjection, submitted, submitRebuttal, setRebuttal, bailOut }) {
-  const scoreLabel = trial.score < 40 ? 'GUILTY OF DELUSION' : trial.score < 75 ? 'PROBATIONARY' : 'BATTLE-TESTED'
+  const band = classifyBand(trial.score)
+  const scoreLabel = GAUGE_LABELS[band]
   const scoreProgress = clamp(trial.score, 0, 100)
   const reaction = trial.phase === 'reaction'
   return (
     <motion.main className="trial-page page-wrap" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
       <div className="trial-topline"><div><span className="eyebrow-line" /> CROSS-EXAMINATION / LIVE PROCEEDING</div><div className="trial-clock"><Clock3 size={13} /> RECORDING ACTIVE</div></div>
       <section className="trial-dashboard">
-        <div className="gauge-card"><div className="gauge-head"><span>SURVIVABILITY GAUGE</span><strong>{trial.score}<small>/100</small></strong></div><div className="gauge-bar"><motion.div className={`gauge-fill ${trial.score < 40 ? 'danger' : trial.score < 75 ? 'warning' : 'safe'}`} animate={{ width: `${scoreProgress}%` }} transition={{ type: 'spring', stiffness: 80, damping: 18 }} /></div><div className="gauge-scale"><span>GUILTY OF DELUSION</span><span>{scoreLabel}</span><span>BATTLE-TESTED</span></div></div>
+        <div className="gauge-card"><div className="gauge-head"><span>SURVIVABILITY GAUGE</span><strong>{trial.score}<small>/100</small></strong></div><div className="gauge-bar"><motion.div className={`gauge-fill ${GAUGE_TONES[band]}`} animate={{ width: `${scoreProgress}%` }} transition={{ type: 'spring', stiffness: 80, damping: 18 }} /></div><div className="gauge-scale"><span>GUILTY OF DELUSION</span><span>{scoreLabel}</span><span>BATTLE-TESTED</span></div></div>
         <div className="case-id-block"><span>CASE DOCKET</span><strong>{caseFile.docket}</strong><small>{caseFile.category.toUpperCase()} / PRIVATE RECORD</small></div>
         <div className="round-block"><span>ROUND</span><strong>0{trial.activeRound + 1}<small> / 03</small></strong><div className="round-dots">{[0, 1, 2].map((round) => <span key={round} className={round <= trial.activeRound ? 'active' : ''} />)}</div></div>
       </section>
