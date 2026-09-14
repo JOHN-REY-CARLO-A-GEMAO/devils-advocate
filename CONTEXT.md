@@ -28,6 +28,8 @@ The band is one rule; the words are not. The trial gauge labels a still-provisio
 
 **Verdict** — the sealed outcome: `score`, `verdictType`, `verdictLabel`, `criticalBlindspot` (`{title, body}`), `strongestDefense`, `strongestPersona`, `prescriptions`.
 
+The Verdict carries judgment only. It holds no Case identity (`docket`, `title`, `category`), no round count, and no transcript of the record: `strongestDefense` and `strongestPersona` are the judgment's summary of the record, not the record itself. The official document is assembled from three sources — the Case for identity, the Verdict for judgment, and the export timestamp — so the round count belongs to the Case (one round per Objection) and is read from there by every surface that displays it.
+
 **Critical blindspot** — the single most dangerous unanswered risk, chosen by precedence: unpriced downside → missing exit ramp → unproven demand → copyability → execution drag.
 
 **Trial** — the pre-mortem state machine over the three Personas, owned by the domain module as `makeTrial` / `answer` / `advance`: `activeRound` (the round on the stand), `score`, `rebuttals` (the record), `phase`, and `reaction` (the evaluation currently on screen). `makeTrial(initialScore)` starts it, `answer(trial, { rebuttal, caseData, evaluation })` records a defense and applies its delta, and `advance(trial, { caseData })` opens the next round or seals the Verdict from the record.
@@ -49,4 +51,5 @@ Providers (OpenAI / Anthropic) and the server seam in `lib/courtroom.ts` own **p
 - Score is clamped to 0..100 at every step; the band thresholds 40 and 75 have one owner, and band values are the canonical `'convicted' | 'probation' | 'acquitted'` strings.
 - Round `r` is answered by `PERSONAS[r]`: `answer` derives the Persona from the round, so the record cannot fall out of registry order.
 - A trial that has not been answered cannot advance, and a finished trial does not advance again.
+- The Verdict has one producer and one writer: `advance` seals it through `createVerdict`, and no other code constructs one or re-derives its fields.
 - Every path returns a playable Case: a failed or malformed provider response falls back to the engine.

@@ -143,7 +143,7 @@ export function evaluateRebuttal({ rebuttal, personaId, signals }) {
 }
 
 export function createVerdict({ caseData, rebuttals, score }) {
-  const { signals, objections } = caseData
+  const { signals } = caseData
   const finalScore = clamp(Math.round(score), 0, 100)
   const verdictType = classifyBand(finalScore)
   const verdictLabel = VERDICT_LABELS[verdictType]
@@ -178,7 +178,6 @@ export function createVerdict({ caseData, rebuttals, score }) {
     strongestDefense,
     strongestPersona: strongest?.personaName || 'the record',
     prescriptions,
-    objections,
   }
 }
 

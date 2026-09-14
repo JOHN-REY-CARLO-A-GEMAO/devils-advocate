@@ -298,7 +298,7 @@ function App() {
         )}
         {screen === 'deliberation' && <DeliberationScreen key="deliberation" step={deliberationStep} />}
         {screen === 'verdict' && verdict && caseFile && (
-          <VerdictScreen key="verdict" caseFile={caseFile} verdict={verdict} trial={trial} downloadPdf={downloadPdf} copyVerdict={copyVerdict} resetTrial={resetTrial} />
+          <VerdictScreen key="verdict" caseFile={caseFile} verdict={verdict} downloadPdf={downloadPdf} copyVerdict={copyVerdict} resetTrial={resetTrial} />
         )}
       </AnimatePresence>
       <AnimatePresence>
@@ -368,17 +368,20 @@ function TrialScreen({ caseFile, trial, activePersona, activeObjection, submitte
   const scoreLabel = GAUGE_LABELS[band]
   const scoreProgress = clamp(trial.score, 0, 100)
   const reaction = trial.phase === 'reaction'
+  // How many rounds this trial runs is a fact about the Case (one round per Objection), not a
+  // presentation constant and not Verdict state. The Trial owns only the round it is on.
+  const totalRounds = String(caseFile.objections.length).padStart(2, '0')
   return (
     <motion.main className="trial-page page-wrap" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
       <div className="trial-topline"><div><span className="eyebrow-line" /> CROSS-EXAMINATION / LIVE PROCEEDING</div><div className="trial-clock"><Clock3 size={13} /> RECORDING ACTIVE</div></div>
       <section className="trial-dashboard">
         <div className="gauge-card"><div className="gauge-head"><span>SURVIVABILITY GAUGE</span><strong>{trial.score}<small>/100</small></strong></div><div className="gauge-bar"><motion.div className={`gauge-fill ${GAUGE_TONES[band]}`} animate={{ width: `${scoreProgress}%` }} transition={{ type: 'spring', stiffness: 80, damping: 18 }} /></div><div className="gauge-scale"><span>GUILTY OF DELUSION</span><span>{scoreLabel}</span><span>BATTLE-TESTED</span></div></div>
         <div className="case-id-block"><span>CASE DOCKET</span><strong>{caseFile.docket}</strong><small>{caseFile.category.toUpperCase()} / PRIVATE RECORD</small></div>
-        <div className="round-block"><span>ROUND</span><strong>0{trial.activeRound + 1}<small> / 03</small></strong><div className="round-dots">{[0, 1, 2].map((round) => <span key={round} className={round <= trial.activeRound ? 'active' : ''} />)}</div></div>
+        <div className="round-block"><span>ROUND</span><strong>0{trial.activeRound + 1}<small> / {totalRounds}</small></strong><div className="round-dots">{caseFile.objections.map((objection, round) => <span key={objection.persona.id} className={round <= trial.activeRound ? 'active' : ''} />)}</div></div>
       </section>
       <div className="trial-grid">
         <section className="witness-column">
-          <div className="witness-caption"><span>THE WITNESS STAND</span><span>WITNESS 0{trial.activeRound + 1} / 03</span></div>
+          <div className="witness-caption"><span>THE WITNESS STAND</span><span>WITNESS 0{trial.activeRound + 1} / {totalRounds}</span></div>
           <AnimatePresence mode="wait">
             <motion.div key={activePersona.id} className={`witness-card persona-${activePersona.color}`} data-posthog-event="objection_faced" data-round={trial.activeRound + 1} data-persona={activePersona.id} initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: .38 }}>
               <div className="witness-card-glow" />
@@ -411,17 +414,20 @@ function DeliberationScreen({ step }) {
   return <motion.main className="deliberation-page page-wrap" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><div className="deliberation-center"><motion.div className="gavel-orbit" animate={{ rotate: [0, -8, 0] }} transition={{ duration: 1.25, repeat: Infinity, ease: 'easeInOut' }}><div className="orbit-ring" /><Gavel size={56} strokeWidth={1.1} /></motion.div><div className="eyebrow centered"><span className="eyebrow-line" /> INTERMISSION / JURY DELIBERATION <span className="eyebrow-line" /></div><h1>The record is being<br /><em>weighed.</em></h1><p>Three hostile perspectives. One clean recommendation.</p><div className="deliberation-list">{DELIBERATION_STEPS.map((status, index) => <div className={`deliberation-row ${index < step ? 'complete' : ''} ${index === step ? 'active' : ''}`} key={status}>{index < step ? <Check size={14} /> : index === step ? <span className="spinner" /> : <span className="pending-dot" />}<span>{status}</span>{index < step && <small>DONE</small>}</div>)}</div><div className="slam-line"><span /><strong>GAVEL DOWN</strong><span /></div></div></motion.main>
 }
 
-function VerdictScreen({ caseFile, verdict, trial, downloadPdf, copyVerdict, resetTrial }) {
+function VerdictScreen({ caseFile, verdict, downloadPdf, copyVerdict, resetTrial }) {
   const tone = verdict.verdictType === 'acquitted' ? 'safe' : verdict.verdictType === 'probation' ? 'warning' : 'danger'
   const verdictHeadline = verdict.verdictType === 'acquitted'
     ? <>Your ambition<br /><em>survives — for now.</em></>
     : verdict.verdictType === 'probation'
       ? <>Your ambition<br /><em>needs conditions.</em></>
       : <>Your ambition<br /><em>needs a rewrite.</em></>
+  // The Case owns how many rounds a trial has (one round per Objection). The Verdict carries the
+  // judgment only, so this document reads the count from the Case rather than holding a copy.
+  const totalRounds = String(caseFile.objections.length).padStart(2, '0')
   return <motion.main className="verdict-page page-wrap" data-posthog-event="verdict_rendered" data-verdict-type={verdict.verdictType} data-final-score={verdict.score} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
     <div className="verdict-top"><div><span className="eyebrow-line" /> FINAL VERDICT / RECORD SEALED</div><div className="verdict-case">{caseFile.docket} <span>·</span> {caseFile.category.toUpperCase()}</div></div>
     <section className="verdict-hero"><div className="verdict-copy"><div className="eyebrow"><Sparkles size={14} /> THE JURY HAS SPOKEN</div><h1>{verdictHeadline}</h1><p>The court reviewed the plan, the pressure points, and every defense entered under oath.</p></div><div className={`stamp-wrap stamp-${tone}`}><motion.div className="verdict-stamp" initial={{ scale: 2.4, rotate: -18, opacity: 0 }} animate={{ scale: 1, rotate: -8, opacity: 1 }} transition={{ type: 'spring', stiffness: 180, damping: 13, delay: .2 }}><span>{verdict.verdictLabel}</span><small>THE DEVIL'S ADVOCATE</small></motion.div></div></section>
-    <section className="score-band"><div className="score-number"><span>SURVIVABILITY SCORE</span><strong>{verdict.score}<small>/100</small></strong></div><div className="score-meter"><div className="score-meter-bar"><motion.div initial={{ width: 0 }} animate={{ width: `${verdict.score}%` }} transition={{ duration: 1, delay: .3 }} className={`gauge-fill ${tone}`} /></div><div className="score-meter-labels"><span>DELUSION</span><span>PROBATION</span><span>BATTLE-TESTED</span></div></div><div className="score-rounds"><span>ROUNDS COMPLETED</span><strong>03 <small>/ 03</small></strong><span className="completed-label"><Check size={12} /> COMPLETE</span></div></section>
+    <section className="score-band"><div className="score-number"><span>SURVIVABILITY SCORE</span><strong>{verdict.score}<small>/100</small></strong></div><div className="score-meter"><div className="score-meter-bar"><motion.div initial={{ width: 0 }} animate={{ width: `${verdict.score}%` }} transition={{ duration: 1, delay: .3 }} className={`gauge-fill ${tone}`} /></div><div className="score-meter-labels"><span>DELUSION</span><span>PROBATION</span><span>BATTLE-TESTED</span></div></div><div className="score-rounds"><span>ROUNDS COMPLETED</span><strong>{totalRounds} <small>/ {totalRounds}</small></strong><span className="completed-label"><Check size={12} /> COMPLETE</span></div></section>
     <div className="verdict-grid"><section className="blindspot-card report-card"><div className="report-card-top"><span className="card-index">01</span><span className="report-label">CRITICAL BLINDSPOT</span><AlertTriangle size={18} /></div><h2>{verdict.criticalBlindspot.title}</h2><p>{verdict.criticalBlindspot.body}</p><div className="card-tag"><span className="tag-dot" /> MOST DANGEROUS UNANSWERED RISK</div></section><section className="defense-card report-card"><div className="report-card-top"><span className="card-index">02</span><span className="report-label">STRONGEST DEFENSE</span><ShieldCheck size={18} /></div><blockquote>“{verdict.strongestDefense}”</blockquote><div className="card-tag"><span className="tag-dot cyan-dot" /> ENTERED BY {verdict.strongestPersona.toUpperCase()}</div></section><section className="prescription-card report-card"><div className="report-card-top"><span className="card-index">03</span><span className="report-label">JURY PRESCRIPTION</span><Landmark size={18} /></div><h2>Before you proceed:</h2><ol>{verdict.prescriptions.map((item, index) => <li key={item}><span>0{index + 1}</span>{item}</li>)}</ol></section></div>
     <section className="verdict-actions"><div><span className="form-kicker">OFFICIAL CASE FILE</span><p>Keep this record. Revisit it when the decision changes shape.</p></div><div className="action-buttons"><button className="secondary-button" id="btn-copy-verdict" type="button" onClick={copyVerdict}><Copy size={15} /> Copy docket link</button><button className="primary-button" id="btn-download-pdf" data-posthog-event="pdf_downloaded" type="button" onClick={downloadPdf}><Download size={15} /> Download official PDF verdict</button><button className="text-button" id="btn-reset-trial" type="button" onClick={resetTrial}>Try another decision <ArrowRight size={15} /></button></div></section>
     <div className="verdict-footnote"><Skull size={14} /> A pre-mortem is not a prophecy. It is a better starting position.</div>

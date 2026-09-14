@@ -103,6 +103,25 @@ test('the verdict carries the canonical fields the UI and PDF read', () => {
   assert.ok(['convicted', 'probation', 'acquitted'].includes(verdict.verdictType))
 })
 
+// The Verdict is the judgment artifact and nothing else. It holds no Case identity (docket,
+// title, category), no round count, and no transcript: `strongestDefense`/`strongestPersona` are
+// the judgment's summary of the record, not the record. The document layer composes those from
+// the Case, which is why the round count is read from `caseData.objections` rather than carried
+// here. Pinned as an exact key set, so a field cannot be added to the artifact without a decision
+// recorded in this test.
+test('the verdict carries exactly the judgment fields, with no case or document payload', () => {
+  const verdict = verdictFor({ title: 'T', plan: 'p', category: 'Startup' })
+  assert.deepEqual(Object.keys(verdict).sort(), [
+    'criticalBlindspot',
+    'prescriptions',
+    'score',
+    'strongestDefense',
+    'strongestPersona',
+    'verdictLabel',
+    'verdictType',
+  ])
+})
+
 // The frozen card-1 contract routes every provider payload through the adapter, so
 // createVerdict only ever sees a canonical CaseAnalysis. This test pins today's failure mode
 // (a TypeError from deep inside) so that the guard cannot silently regress into producing an
