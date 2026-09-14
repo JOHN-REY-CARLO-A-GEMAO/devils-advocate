@@ -35,6 +35,9 @@ export const PERSONAS = [
   },
 ]
 
+/** The canonical starting envelope for a trial. One location, used by the engine and the provider adapter. */
+export const INITIAL_SCORE_RANGE = { min: 18, max: 61 }
+
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
 
 const words = (value = '') => value.trim().split(/\s+/).filter(Boolean)
@@ -91,7 +94,7 @@ function buildObjections(title, plan, category, signals) {
 export function analyzeCase({ title, plan, category }) {
   const signals = parseSignals(title, plan, category)
   const categoryBoost = { Career: 2, Startup: 0, Financial: -3, Relocation: 1, Relationship: -1 }[category] ?? 0
-  const initialScore = clamp(23 + signals.specificity * 5 + (signals.planWords >= 80 ? 5 : signals.planWords >= 45 ? 2 : 0) + categoryBoost, 18, 61)
+  const initialScore = clamp(23 + signals.specificity * 5 + (signals.planWords >= 80 ? 5 : signals.planWords >= 45 ? 2 : 0) + categoryBoost, INITIAL_SCORE_RANGE.min, INITIAL_SCORE_RANGE.max)
   return {
     signals,
     initialScore,

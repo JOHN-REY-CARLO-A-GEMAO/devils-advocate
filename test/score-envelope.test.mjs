@@ -4,7 +4,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { evaluateRebuttal, analyzeCase, createVerdict } from '../src/lib/courtroom.js'
+import { evaluateRebuttal, analyzeCase, createVerdict, INITIAL_SCORE_RANGE } from '../src/lib/courtroom.js'
 
 const CATEGORIES = ['Career', 'Startup', 'Financial', 'Relocation', 'Relationship']
 
@@ -16,10 +16,13 @@ const PLAN_SHAPES = {
     + 'unique advantage risk downside assumption ' + Array(90).fill('word').join(' '),
 }
 
-// The canonical starting envelope, owned by the engine's clamp. Asserted as a literal here;
-// when the range becomes an exported constant (commit 2, with the adapter) the same numbers
-// are asserted through that export instead.
+// The canonical starting envelope, owned by the engine and now exported so the provider
+// adapter normalizes against the same numbers rather than its own copy.
 const ENVELOPE = { min: 18, max: 61 }
+
+test('the canonical starting envelope is exported from the domain module', () => {
+  assert.deepEqual(INITIAL_SCORE_RANGE, ENVELOPE)
+})
 
 test('initialScore stays inside the canonical envelope for every category and plan shape', () => {
   for (const category of CATEGORIES) {
